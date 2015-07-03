@@ -1,7 +1,11 @@
 module Widget where
 
 import Html exposing (..)
-import Html.Events exposing (onClick)
+import Html.Attributes exposing (value)
+import Html.Events exposing (onClick, on, targetValue)
+import Maybe
+import Result
+import String
 import Time exposing (Time, hour, minute, second)
 import Timer exposing (start, stop)
 import Task exposing (Task, andThen)
@@ -11,7 +15,8 @@ type alias Model =
   }
 
 type Action = NoOp
-            | Start Time
+            | Start
+            | Set Time
             | Tick Time
             | Halt
             | Reset
@@ -26,8 +31,11 @@ update action model =
   case action of
     NoOp ->
       (model, None)
-    Start time ->
-      ({ model | remaining <- time }, StartWith time)
+    Start ->
+      (model, StartWith model.remaining)
+    -- TODO Check whether we are running
+    Set time ->
+      ({ model | remaining <- time }, None)
     Tick time ->
       ({ model | remaining <- time }, if time < 1 then Shutdown else None)
     Halt ->
@@ -69,21 +77,48 @@ formatMinutes = formatTime Time.inMinutes hour
 formatHours : Time -> String
 formatHours = formatTime Time.inHours (hour * 99)
 
-displayTime : Time -> String
+hours = Signal.mailbox 0
+minutes = Signal.mailbox 0
+seconds = Signal.mailbox 0
+
+timeset = Signal.map3 (\x y z -> Set (x + y + z)) hours.signal minutes.signal seconds.signal
+
+strToFloat str =
+  Maybe.withDefault 0 (Result.toMaybe (String.toFloat str))
+
+displayTime : Time -> Html
 displayTime time =
-  formatHours time ++ ":" ++ formatMinutes time ++ ":" ++ formatSeconds time
+  form []
+    [ input
+        [ on "change" targetValue (Signal.message hours.address << (\t -> t * hour) << strToFloat)
+        , value (formatHours time)
+        ]
+        []
+    , input
+        [ on "change" targetValue (Signal.message minutes.address << (\t -> t * minute) << strToFloat)
+        , value (formatMinutes time)
+        ]
+        []
+    , input
+        [ on "change" targetValue (Signal.message seconds.address << (\t -> t * minute) << strToFloat)
+        , value (formatSeconds time)
+        ]
+        []
+    ]
 
 controls = Signal.mailbox NoOp
 
-inputs = Signal.merge
-  controls.signal
-  (Signal.map Tick remaining)
+inputs = Signal.mergeMany
+  [ controls.signal
+  , (Signal.map Tick remaining)
+  , timeset
+  ]
 
 view : Model -> Html
 view model =
   div []
-    [ span [] [ text (displayTime model.remaining) ]
-    , button [ onClick controls.address (Start (7 * second)) ] [ text "Start" ]
+    [ span [] [ displayTime model.remaining ]
+    , button [ onClick controls.address Start ] [ text "Start" ]
     , button [ onClick controls.address Halt ] [ text "Halt" ]
     , button [ onClick controls.address Reset ] [ text "Reset" ]
     ]
